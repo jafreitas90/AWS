@@ -1,0 +1,455 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "A simple backend (read/write to DynamoDB) with a HTTP API endpoint using Amazon API Gateway.",
+    "Parameters": {
+        "TableNameParameter": {
+            "Description": "A name for the table.",
+            "Type": "String"
+        },
+        "TagParameter": {
+            "Description": "The tag to assign to resources.",
+            "Type": "String"
+        },
+        "MicroserviceLambdaFunctionNameParameter": {
+            "Description": "The name of the Lambda function.",
+            "Type": "String"
+        },
+        "APITitleNameParameter": {
+            "Description": "The name of the Lambda function.",
+            "Type": "String"
+        },
+        "AppPoolClientIDParameter": {
+            "Description": "Cliend id from App Pool.",
+            "Type": "String"
+        },
+        "AppPoolIDParameter": {
+            "Description": "App Pool Id.",
+            "Type": "String"
+        },
+        "GetScopeParameter": {
+            "Description": "The authorization scope supported for Get route.",
+            "Type": "String"
+        },
+        "DeleteScopeParameter": {
+            "Description": "The authorization scope supported for Delete route.",
+            "Type": "String"
+        },
+        "PostScopeParameter": {
+            "Description": "The authorization scope supported for POST route.",
+            "Type": "String"
+        },
+        "RouteNameParameter": {
+            "Description": "The route key for the route.",
+            "Type": "String"
+        }
+    },
+    "Resources": {
+        "DynamoDBTableResource": {
+            "Type": "AWS::DynamoDB::Table",
+            "Properties": {
+                "AttributeDefinitions": [
+                    {
+                        "AttributeName": "Album",
+                        "AttributeType": "S"
+                    },
+                    {
+                        "AttributeName": "Artist",
+                        "AttributeType": "S"
+                    }
+                ],
+                "KeySchema": [
+                    {
+                        "AttributeName": "Album",
+                        "KeyType": "HASH"
+                    },
+                    {
+                        "AttributeName": "Artist",
+                        "KeyType": "RANGE"
+                    }
+                ],
+                "TableName": {
+                    "Ref": "TableNameParameter"
+                },
+                "ProvisionedThroughput": {
+                    "ReadCapacityUnits": "5",
+                    "WriteCapacityUnits": "5"
+                },
+                "Tags": [
+                    {
+                        "Value": {
+                            "Ref": "TagParameter"
+                        },
+                        "Key": "application"
+                    }
+                ]
+            }
+        },
+        "MicroserviceLambdaFunctionRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Action": [
+                                "sts:AssumeRole"
+                            ],
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": [
+                                    "lambda.amazonaws.com"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "Policies": [
+                    {
+                        "PolicyName": "MicroserviceLambdaFunctionRolePolicy1",
+                        "PolicyDocument": {
+                            "Statement": [
+                                {
+                                    "Action": [
+                                        "dynamodb:GetItem",
+                                        "dynamodb:DeleteItem",
+                                        "dynamodb:PutItem",
+                                        "dynamodb:Scan",
+                                        "dynamodb:Query",
+                                        "dynamodb:UpdateItem",
+                                        "dynamodb:BatchWriteItem",
+                                        "dynamodb:BatchGetItem",
+                                        "dynamodb:DescribeTable",
+                                        "dynamodb:ConditionCheckItem"
+                                    ],
+                                    "Resource": [
+                                        {
+                                            "Fn::GetAtt": [
+                                                "DynamoDBTableResource",
+                                                "Arn"
+                                            ]
+                                        }
+                                    ],
+                                    "Effect": "Allow"
+                                },
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "logs:CreateLogGroup",
+                                        "logs:CreateLogStream",
+                                        "logs:PutLogEvents"
+                                    ],
+                                    "Resource": [
+                                        "arn:aws:logs:*:*:*"
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Value": {
+                            "Ref": "TagParameter"
+                        },
+                        "Key": "application"
+                    }
+                ]
+            }
+        },
+        "MicroserviceLambdaFunctionResource": {
+            "Type": "AWS::Lambda::Function",
+            "Properties": {
+                "FunctionName": {
+                    "Ref": "MicroserviceLambdaFunctionNameParameter"
+                },
+                "Role": {
+                    "Fn::GetAtt": [
+                        "MicroserviceLambdaFunctionRole",
+                        "Arn"
+                    ]
+                },
+                "Handler": "index.lambda_handler",
+                "Code": {
+                    "ZipFile": "import boto3\nimport json\n\nprint('Loading function')\ndynamo = boto3.client('dynamodb')\n\ndef respond(err, res=None):\n    return {\n        'statusCode': '400' if err else '200',\n        'body': err.message if err else json.dumps(res),\n        'headers': {\n            'Content-Type': 'application/json',\n        },\n    }\n\n\ndef lambda_handler(event, context):\n    print(\"Received event: \" + json.dumps(event, indent=2))\n\n    operations = {\n        'DELETE': lambda dynamo, x: dynamo.delete_item(**x),\n        'GET': lambda dynamo, x: dynamo.scan(**x),\n        'POST': lambda dynamo, x: dynamo.put_item(**x),\n        'PUT': lambda dynamo, x: dynamo.update_item(**x),\n    }\n    \n    operation =  event['requestContext']['http']['method']\n\n    if operation in operations:\n        payload = event['queryStringParameters'] if operation == 'GET' else json.loads(event['body'])\n        return respond(None, operations[operation](dynamo, payload))\n    else:\n        return respond(ValueError('Unsupported method \"{}\"'.format(operation)))\n"
+                },
+                "Runtime": "python3.7",
+                "Timeout": 30,
+                "Tags": [
+                    {
+                        "Value": {
+                            "Ref": "TagParameter"
+                        },
+                        "Key": "application"
+                    }
+                ]
+            },
+            "DependsOn": [
+                "DynamoDBTableResource"
+            ]
+        },
+        "MicroserviceLambdaFunctioPermissionResource": {
+            "Type": "AWS::Lambda::Permission",
+            "Properties": {
+                "Action": "lambda:InvokeFunction",
+                "Principal": "apigateway.amazonaws.com",
+                "FunctionName": {
+                    "Ref": "MicroserviceLambdaFunctionResource"
+                },
+                "SourceArn": {
+                    "Fn::Sub": [
+                        "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${__ApiId__}/${__Stage__}/*/Music",
+                        {
+                            "__Stage__": "*",
+                            "__ApiId__": {
+                                "Ref": "HTTPApiResource"
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        "HTTPApiResource": {
+            "Type": "AWS::ApiGatewayV2::Api",
+            "Properties": {
+                "Name": {
+                    "Ref": "APITitleNameParameter"
+                },
+                "Description": "HTTP API integrated with lambda.",
+                "ProtocolType": "HTTP",
+                "Target": {
+                    "Fn::GetAtt": [
+                        "MicroserviceLambdaFunctionResource",
+                        "Arn"
+                    ]
+                },
+                "Tags": {
+                    "Value": {
+                        "Ref": "TagParameter"
+                    },
+                    "Key": "application"
+                }
+            }
+        },
+        "HTTPApiAuthorizerResource": {
+            "Type": "AWS::ApiGatewayV2::Authorizer",
+            "Properties": {
+                "Name": "cognito_authorizer",
+                "ApiId": {
+                    "Ref": "HTTPApiResource"
+                },
+                "JwtConfiguration": {
+                    "Audience": [
+                        {
+                            "Ref": "AppPoolClientIDParameter"
+                        }
+                    ],
+                    "Issuer": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "https://cognito-idp.",
+                                {
+                                    "Ref": "AWS::Region"
+                                },
+                                ".amazonaws.com/",
+                                {
+                                    "Ref": "AppPoolIDParameter"
+                                }
+                            ]
+                        ]
+                    }
+                },
+                "AuthorizerType": "JWT",
+                "IdentitySource": [
+                    "$request.header.Authorization"
+                ]
+            }
+        },
+        "HTTPApiIntegrationResource": {
+            "Type": "AWS::ApiGatewayV2::Integration",
+            "Properties": {
+                "ApiId": {
+                    "Ref": "HTTPApiResource"
+                },
+                "Description": "Lambda Integration",
+                "IntegrationType": "AWS_PROXY",
+                "IntegrationUri": {
+                    "Fn::GetAtt": [
+                        "MicroserviceLambdaFunctionResource",
+                        "Arn"
+                    ]
+                },
+                "ConnectionType": "INTERNET",
+                "PayloadFormatVersion": "2.0"
+            },
+            "DependsOn": [
+                "HTTPApiResource"
+            ]
+        },
+        "HTTPApiGetRouteResource": {
+            "Type": "AWS::ApiGatewayV2::Route",
+            "Properties": {
+                "ApiId": {
+                    "Ref": "HTTPApiResource"
+                },
+                "AuthorizationScopes": [
+                    {
+                        "Ref": "GetScopeParameter"
+                    }
+                ],
+                "AuthorizationType": "JWT",
+                "RouteKey": {
+                    "Fn::Join": [
+                        "",
+                        [
+                            "GET /",
+                            {
+                                "Ref": "RouteNameParameter"
+                            }
+                        ]
+                    ]
+                },
+                "AuthorizerId": {
+                    "Ref": "HTTPApiAuthorizerResource"
+                },
+                "OperationName": "Get",
+                "Target": {
+                    "Fn::Join": [
+                        "/",
+                        [
+                            "integrations",
+                            {
+                                "Ref": "HTTPApiIntegrationResource"
+                            }
+                        ]
+                    ]
+                }
+            },
+            "DependsOn": [
+                "HTTPApiResource",
+                "HTTPApiIntegrationResource"
+            ]
+        },
+        "HTTPApiPostRouteResource": {
+            "Type": "AWS::ApiGatewayV2::Route",
+            "Properties": {
+                "ApiId": {
+                    "Ref": "HTTPApiResource"
+                },
+                "AuthorizationScopes": [
+                    {
+                        "Ref": "PostScopeParameter"
+                    }
+                ],
+                "AuthorizationType": "JWT",
+                "RouteKey": {
+                    "Fn::Join": [
+                        "",
+                        [
+                            "POST /",
+                            {
+                                "Ref": "RouteNameParameter"
+                            }
+                        ]
+                    ]
+                },
+                "AuthorizerId": {
+                    "Ref": "HTTPApiAuthorizerResource"
+                },
+                "OperationName": "Post",
+                "Target": {
+                    "Fn::Join": [
+                        "/",
+                        [
+                            "integrations",
+                            {
+                                "Ref": "HTTPApiIntegrationResource"
+                            }
+                        ]
+                    ]
+                }
+            },
+            "DependsOn": [
+                "HTTPApiResource",
+                "HTTPApiIntegrationResource"
+            ]
+        },
+        "HTTPApiDeleteRouteResource": {
+            "Type": "AWS::ApiGatewayV2::Route",
+            "Properties": {
+                "ApiId": {
+                    "Ref": "HTTPApiResource"
+                },
+                "AuthorizationScopes": [
+                    {
+                        "Ref": "DeleteScopeParameter"
+                    }
+                ],
+                "AuthorizationType": "JWT",
+                "RouteKey": {
+                    "Fn::Join": [
+                        "",
+                        [
+                            "DELETE /",
+                            {
+                                "Ref": "RouteNameParameter"
+                            }
+                        ]
+                    ]
+                },
+                "AuthorizerId": {
+                    "Ref": "HTTPApiAuthorizerResource"
+                },
+                "OperationName": "Delete",
+                "Target": {
+                    "Fn::Join": [
+                        "/",
+                        [
+                            "integrations",
+                            {
+                                "Ref": "HTTPApiIntegrationResource"
+                            }
+                        ]
+                    ]
+                }
+            },
+            "DependsOn": [
+                "HTTPApiResource",
+                "HTTPApiIntegrationResource"
+            ]
+        }
+    },
+    "Outputs": {
+        "DynamoTableName": {
+            "Value": {
+                "Ref": "DynamoDBTableResource"
+            }
+        },
+        "DynamoTableArn": {
+            "Value": {
+                "Fn::GetAtt": [
+                    "DynamoDBTableResource",
+                    "Arn"
+                ]
+            }
+        },
+        "MicroserviceLambdaFunctionArn": {
+            "Value": {
+                "Fn::GetAtt": [
+                    "MicroserviceLambdaFunctionResource",
+                    "Arn"
+                ]
+            }
+        },
+        "MicroserviceLambdaFunctionName": {
+            "Value": {
+                "Ref": "MicroserviceLambdaFunctionResource"
+            }
+        },
+        "MicroserviceLambdaFunctionRoleName": {
+            "Value": {
+                "Ref": "MicroserviceLambdaFunctionRole"
+            }
+        }
+    }
+}
