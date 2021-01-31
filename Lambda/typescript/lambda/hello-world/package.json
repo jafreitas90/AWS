@@ -1,0 +1,19 @@
+{
+  "name": "typescript_lambda",
+  "version": "1.0.0",
+  "description": "hello world sample for TypeScript",
+  "main": "app.js",
+  "repository": "https://github.com/jafreitas90/AWS",
+  "author": "Jorge Freitas",
+  "license": "JorgeFreitas Ltd :)",
+  "dependencies": {},
+  "scripts": {
+    "compile": "tsc"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.71",
+    "@types/node": "^14.14.22",
+    "aws-sdk": "^2.815.0",
+    "typescript": "^4.1.3"
+  }
+}
